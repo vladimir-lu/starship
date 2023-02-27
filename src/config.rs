@@ -266,13 +266,76 @@ impl StarshipConfig {
 }
 
 /// Deserialize a style string in the starship format with serde
-pub fn deserialize_style<'de, D>(de: D) -> Result<nu_ansi_term::Style, D::Error>
+pub fn deserialize_style<'de, D>(de: D) -> Result<CustomStyle, D::Error>
 where
     D: Deserializer<'de>,
 {
     Cow::<'_, str>::deserialize(de).and_then(|s| {
         parse_style_string(s.as_ref(), None).ok_or_else(|| D::Error::custom("Invalid style string"))
     })
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CustomStyle {
+    style: nu_ansi_term::Style,
+    prev_fg: bool,
+    prev_bg: bool,
+}
+
+impl CustomStyle {
+    fn new() -> CustomStyle {
+        CustomStyle {
+            style: nu_ansi_term::Style::new(),
+            prev_fg: false,
+            prev_bg: false,
+        }
+    }
+
+    pub fn style(&self) -> &nu_ansi_term::Style {
+        &self.style
+    }
+
+    fn map_style<F>(&self, f: F) -> Self
+    where
+        F: FnOnce(&nu_ansi_term::Style) -> nu_ansi_term::Style,
+    {
+        CustomStyle {
+            style: f(&self.style),
+            ..*self
+        }
+    }
+
+    fn prev_fg(&self, value: bool) -> Self {
+        CustomStyle {
+            prev_fg: value,
+            ..*self
+        }
+    }
+
+    fn prev_bg(&self, value: bool) -> Self {
+        CustomStyle {
+            prev_bg: value,
+            ..*self
+        }
+    }
+}
+
+impl From<nu_ansi_term::Style> for CustomStyle {
+    fn from(value: nu_ansi_term::Style) -> Self {
+        CustomStyle {
+            style: value,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<nu_ansi_term::Color> for CustomStyle {
+    fn from(value: nu_ansi_term::Color) -> Self {
+        CustomStyle {
+            style: value.into(),
+            ..Default::default()
+        }
+    }
 }
 
 /** Parse a style string which represents an ansi style. Valid tokens in the style
@@ -286,13 +349,10 @@ where
  - 'blink'
  - '<color>'       (see the `parse_color_string` doc for valid color strings)
 */
-pub fn parse_style_string(
-    style_string: &str,
-    context: Option<&Context>,
-) -> Option<nu_ansi_term::Style> {
+pub fn parse_style_string(style_string: &str, context: Option<&Context>) -> Option<CustomStyle> {
     style_string
         .split_whitespace()
-        .fold(Some(nu_ansi_term::Style::new()), |maybe_style, token| {
+        .fold(Some(CustomStyle::new()), |maybe_style, token| {
             maybe_style.and_then(|style| {
                 let token = token.to_lowercase();
 
@@ -307,14 +367,16 @@ pub fn parse_style_string(
                 };
 
                 match token.as_str() {
-                    "underline" => Some(style.underline()),
-                    "bold" => Some(style.bold()),
-                    "italic" => Some(style.italic()),
-                    "dimmed" => Some(style.dimmed()),
-                    "inverted" => Some(style.reverse()),
-                    "blink" => Some(style.blink()),
-                    "hidden" => Some(style.hidden()),
-                    "strikethrough" => Some(style.strikethrough()),
+                    "underline" => Some(style.map_style(|s| s.underline())),
+                    "bold" => Some(style.map_style(|s| s.bold())),
+                    "italic" => Some(style.map_style(|s| s.italic())),
+                    "dimmed" => Some(style.map_style(|s| s.dimmed())),
+                    "inverted" => Some(style.map_style(|s| s.reverse())),
+                    "blink" => Some(style.map_style(|s| s.blink())),
+                    "hidden" => Some(style.map_style(|s| s.hidden())),
+                    "strikethrough" => Some(style.map_style(|s| s.strikethrough())),
+                    "prevfg" => Some(style.prev_fg(true)),
+                    "prevbg" => Some(style.prev_bg(true)),
                     // When the string is supposed to be a color:
                     // Decide if we yield none, reset background or set color.
                     color_string => {
@@ -334,15 +396,15 @@ pub fn parse_style_string(
                             // bg + invalid color = reset the background to default.
                             if !col_fg && parsed.is_none() {
                                 let mut new_style = style;
-                                new_style.background = Option::None;
+                                new_style.style.background = Option::None;
                                 Some(new_style)
                             } else {
                                 // Valid color, apply color to either bg or fg
                                 parsed.map(|ansi_color| {
                                     if col_fg {
-                                        style.fg(ansi_color)
+                                        style.map_style(|s| s.fg(ansi_color))
                                     } else {
-                                        style.on(ansi_color)
+                                        style.map_style(|s| s.on(ansi_color))
                                     }
                                 })
                             }
@@ -452,7 +514,7 @@ mod tests {
 
     // Small wrapper to allow deserializing Style without a struct with #[serde(deserialize_with=)]
     #[derive(Default, Clone, Debug, PartialEq)]
-    struct StyleWrapper(Style);
+    struct StyleWrapper(CustomStyle);
 
     impl<'de> Deserialize<'de> for StyleWrapper {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -500,7 +562,7 @@ mod tests {
         struct SegmentDisplayConfig<'a> {
             pub value: &'a str,
             #[serde(deserialize_with = "deserialize_style")]
-            pub style: Style,
+            pub style: CustomStyle,
         }
 
         let config = toml::toml! {
@@ -514,14 +576,14 @@ mod tests {
             git_status_config.untracked,
             SegmentDisplayConfig {
                 value: "x",
-                style: Style::default(),
+                style: CustomStyle::default(),
             }
         );
         assert_eq!(
             git_status_config.modified,
             SegmentDisplayConfig {
                 value: "∙",
-                style: Color::Red.normal(),
+                style: Color::Red.normal().into(),
             }
         );
     }
@@ -631,7 +693,7 @@ mod tests {
         let config = Value::from("red bold");
         assert_eq!(
             <StyleWrapper>::from_config(&config).unwrap().0,
-            Color::Red.bold()
+            Color::Red.bold().into()
         );
     }
 
@@ -669,13 +731,13 @@ mod tests {
     fn table_get_styles_bold_italic_underline_green_dimmed_silly_caps() {
         let config = Value::from("bOlD ItAlIc uNdErLiNe GrEeN diMMeD");
         let mystyle = <StyleWrapper>::from_config(&config).unwrap().0;
-        assert!(mystyle.is_bold);
-        assert!(mystyle.is_italic);
-        assert!(mystyle.is_underline);
-        assert!(mystyle.is_dimmed);
+        assert!(mystyle.style().is_bold);
+        assert!(mystyle.style().is_italic);
+        assert!(mystyle.style().is_underline);
+        assert!(mystyle.style().is_dimmed);
         assert_eq!(
-            mystyle,
-            nu_ansi_term::Style::new()
+            mystyle.style(),
+            &nu_ansi_term::Style::new()
                 .bold()
                 .italic()
                 .underline()
@@ -688,14 +750,14 @@ mod tests {
     fn table_get_styles_bold_italic_underline_green_dimmed_inverted_silly_caps() {
         let config = Value::from("bOlD ItAlIc uNdErLiNe GrEeN diMMeD InVeRTed");
         let mystyle = <StyleWrapper>::from_config(&config).unwrap().0;
-        assert!(mystyle.is_bold);
-        assert!(mystyle.is_italic);
-        assert!(mystyle.is_underline);
-        assert!(mystyle.is_dimmed);
-        assert!(mystyle.is_reverse);
+        assert!(mystyle.style().is_bold);
+        assert!(mystyle.style().is_italic);
+        assert!(mystyle.style().is_underline);
+        assert!(mystyle.style().is_dimmed);
+        assert!(mystyle.style().is_reverse);
         assert_eq!(
-            mystyle,
-            nu_ansi_term::Style::new()
+            mystyle.style(),
+            &nu_ansi_term::Style::new()
                 .bold()
                 .italic()
                 .underline()
@@ -709,14 +771,14 @@ mod tests {
     fn table_get_styles_bold_italic_underline_green_dimmed_blink_silly_caps() {
         let config = Value::from("bOlD ItAlIc uNdErLiNe GrEeN diMMeD bLiNk");
         let mystyle = <StyleWrapper>::from_config(&config).unwrap().0;
-        assert!(mystyle.is_bold);
-        assert!(mystyle.is_italic);
-        assert!(mystyle.is_underline);
-        assert!(mystyle.is_dimmed);
-        assert!(mystyle.is_blink);
+        assert!(mystyle.style().is_bold);
+        assert!(mystyle.style().is_italic);
+        assert!(mystyle.style().is_underline);
+        assert!(mystyle.style().is_dimmed);
+        assert!(mystyle.style().is_blink);
         assert_eq!(
-            mystyle,
-            nu_ansi_term::Style::new()
+            mystyle.style(),
+            &nu_ansi_term::Style::new()
                 .bold()
                 .italic()
                 .underline()
@@ -730,14 +792,14 @@ mod tests {
     fn table_get_styles_bold_italic_underline_green_dimmed_hidden_silly_caps() {
         let config = Value::from("bOlD ItAlIc uNdErLiNe GrEeN diMMeD hIDDen");
         let mystyle = <StyleWrapper>::from_config(&config).unwrap().0;
-        assert!(mystyle.is_bold);
-        assert!(mystyle.is_italic);
-        assert!(mystyle.is_underline);
-        assert!(mystyle.is_dimmed);
-        assert!(mystyle.is_hidden);
+        assert!(mystyle.style().is_bold);
+        assert!(mystyle.style().is_italic);
+        assert!(mystyle.style().is_underline);
+        assert!(mystyle.style().is_dimmed);
+        assert!(mystyle.style().is_hidden);
         assert_eq!(
-            mystyle,
-            nu_ansi_term::Style::new()
+            mystyle.style(),
+            &nu_ansi_term::Style::new()
                 .bold()
                 .italic()
                 .underline()
@@ -751,14 +813,14 @@ mod tests {
     fn table_get_styles_bold_italic_underline_green_dimmed_strikethrough_silly_caps() {
         let config = Value::from("bOlD ItAlIc uNdErLiNe GrEeN diMMeD StRiKEthROUgh");
         let mystyle = <StyleWrapper>::from_config(&config).unwrap().0;
-        assert!(mystyle.is_bold);
-        assert!(mystyle.is_italic);
-        assert!(mystyle.is_underline);
-        assert!(mystyle.is_dimmed);
-        assert!(mystyle.is_strikethrough);
+        assert!(mystyle.style().is_bold);
+        assert!(mystyle.style().is_italic);
+        assert!(mystyle.style().is_underline);
+        assert!(mystyle.style().is_dimmed);
+        assert!(mystyle.style().is_strikethrough);
         assert_eq!(
-            mystyle,
-            nu_ansi_term::Style::new()
+            mystyle.style(),
+            &nu_ansi_term::Style::new()
                 .bold()
                 .italic()
                 .underline()
@@ -773,7 +835,7 @@ mod tests {
         // Test a "plain" style with no formatting
         let config = Value::from("");
         let plain_style = <StyleWrapper>::from_config(&config).unwrap().0;
-        assert_eq!(plain_style, nu_ansi_term::Style::new());
+        assert_eq!(plain_style.style(), &nu_ansi_term::Style::new());
 
         // Test a string that's clearly broken
         let config = Value::from("djklgfhjkldhlhk;j");
@@ -810,21 +872,21 @@ mod tests {
         let config = Value::from("fg:red bg:none");
         assert_eq!(
             <StyleWrapper>::from_config(&config).unwrap().0,
-            Color::Red.normal()
+            Color::Red.normal().into()
         );
 
         // Test that bg:none will yield a style
         let config = Value::from("fg:red bg:none bold");
         assert_eq!(
             <StyleWrapper>::from_config(&config).unwrap().0,
-            Color::Red.bold()
+            Color::Red.bold().into()
         );
 
         // Test that bg:none will overwrite the previous background colour
         let config = Value::from("fg:red bg:green bold bg:none");
         assert_eq!(
             <StyleWrapper>::from_config(&config).unwrap().0,
-            Color::Red.bold()
+            Color::Red.bold().into()
         );
     }
 
@@ -834,8 +896,8 @@ mod tests {
         let config = Value::from("bg:#050505 underline fg:120");
         let flipped_style = <StyleWrapper>::from_config(&config).unwrap().0;
         assert_eq!(
-            flipped_style,
-            Style::new()
+            flipped_style.style(),
+            &Style::new()
                 .underline()
                 .fg(Color::Fixed(120))
                 .on(Color::Rgb(5, 5, 5))
@@ -845,8 +907,8 @@ mod tests {
         let config = Value::from("bg:120 bg:125 bg:127 fg:127 122 125");
         let multi_style = <StyleWrapper>::from_config(&config).unwrap().0;
         assert_eq!(
-            multi_style,
-            Style::new().fg(Color::Fixed(125)).on(Color::Fixed(127))
+            multi_style.style(),
+            &Style::new().fg(Color::Fixed(125)).on(Color::Fixed(127))
         );
     }
 
