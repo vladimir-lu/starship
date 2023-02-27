@@ -97,6 +97,7 @@ pub const ALL_MODULES: &[&str] = &[
 
 /// A module is a collection of segments showing data for a single integration
 /// (e.g. The git module shows the current git branch and status)
+#[derive(Debug)]
 pub struct Module<'a> {
     /// The module's configuration map if available
     pub config: Option<&'a toml::Value>,
@@ -209,7 +210,13 @@ where
             }
             _ => {
                 used += segment.width_graphemes();
-                current.push(segment.ansi_string(current.last()));
+                let temp = segment.ansi_string(current.last());
+                log::warn!("TEMP: {:?}", temp);
+                if temp.to_string().len() == 0 {
+                    log::warn!("SEG??? {:?}", segment);
+                }
+
+                current.push(temp);
             }
         }
 

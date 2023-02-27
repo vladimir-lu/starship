@@ -7,7 +7,7 @@ use std::fmt;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Type that holds text with an associated style
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TextSegment {
     /// The segment's style. If None, will inherit the style of the module containing it.
     style: Option<CustomStyle>,
@@ -20,14 +20,18 @@ impl TextSegment {
     // Returns the AnsiString of the segment value
     fn ansi_string(&self, prev: Option<&AnsiString>) -> AnsiString {
         match self.style {
-            Some(style) => style.custom(prev).paint(&self.value),
+            Some(style) => {
+                log::warn!("value: '{}', prev is {:?}", &self.value, prev);
+
+                style.custom(prev).paint(&self.value)
+            }
             None => AnsiString::from(&self.value),
         }
     }
 }
 
 /// Type that holds fill text with an associated style
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FillSegment {
     /// The segment's style. If None, will inherit the style of the module containing it.
     style: Option<CustomStyle>,
@@ -92,7 +96,7 @@ mod fill_seg_tests {
 }
 
 /// A segment is a styled text chunk ready for printing.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Segment {
     Text(TextSegment),
     Fill(FillSegment),

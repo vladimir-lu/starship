@@ -278,31 +278,37 @@ where
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CustomStyle {
     style: nu_ansi_term::Style,
-    prev_fg: bool,
-    prev_bg: bool,
+    bg_prev_fg: bool,
+    bg_prev_bg: bool,
+    fg_prev_fg: bool,
+    fg_prev_bg: bool,
 }
 
 impl CustomStyle {
     fn new() -> CustomStyle {
-        CustomStyle {
-            style: nu_ansi_term::Style::new(),
-            prev_fg: false,
-            prev_bg: false,
-        }
+        Default::default()
     }
 
     pub fn custom(&self, prev: Option<&nu_ansi_term::AnsiString>) -> nu_ansi_term::Style {
-        let mut current = self.style;
         match prev {
-            None => current,
+            None => self.style,
             Some(prev_string) => {
-                if self.prev_bg {
-                    log::warn!("prev_bg, text: {:?}", prev_string);
+                let mut current = self.style;
+                if self.bg_prev_bg {
                     current.background = prev_string.style_ref().background.to_owned();
+                    log::warn!("bg_prev_bg, curr: {:?}, prev: {:?}", current, prev_string);
                 }
-                if self.prev_fg {
-                    log::warn!("prev_fg, text: {:?}", prev_string);
+                if self.bg_prev_fg {
+                    current.background = prev_string.style_ref().foreground.to_owned();
+                    log::warn!("bg_prev_bg, curr: {:?}, prev: {:?}", current, prev_string);
+                }
+                if self.fg_prev_fg {
                     current.foreground = prev_string.style_ref().foreground.to_owned();
+                    log::warn!("fg_prev_fg, curr: {:?}, prev: {:?}", current, prev_string);
+                }
+                if self.fg_prev_bg {
+                    current.foreground = prev_string.style_ref().background.to_owned();
+                    log::warn!("fg_prev_bg, curr: {:?}, prev: {:?}", current, prev_string);
                 }
 
                 current
@@ -324,17 +330,31 @@ impl CustomStyle {
         }
     }
 
-    fn prev_fg(&self, value: bool) -> Self {
-        CustomStyle {
-            prev_fg: value,
-            ..*self
+    fn prev_fg(&self, col_fg: bool) -> Self {
+        if col_fg {
+            CustomStyle {
+                fg_prev_fg: true,
+                ..*self
+            }
+        } else {
+            CustomStyle {
+                bg_prev_fg: true,
+                ..*self
+            }
         }
     }
 
-    fn prev_bg(&self, value: bool) -> Self {
-        CustomStyle {
-            prev_bg: value,
-            ..*self
+    fn prev_bg(&self, col_fg: bool) -> Self {
+        if col_fg {
+            CustomStyle {
+                fg_prev_bg: true,
+                ..*self
+            }
+        } else {
+            CustomStyle {
+                bg_prev_bg: true,
+                ..*self
+            }
         }
     }
 }
@@ -394,8 +414,8 @@ pub fn parse_style_string(style_string: &str, context: Option<&Context>) -> Opti
                     "blink" => Some(style.map_style(|s| s.blink())),
                     "hidden" => Some(style.map_style(|s| s.hidden())),
                     "strikethrough" => Some(style.map_style(|s| s.strikethrough())),
-                    "prevfg" => Some(style.prev_fg(true)),
-                    "prevbg" => Some(style.prev_bg(true)),
+                    "prevfg" => Some(style.prev_fg(col_fg)),
+                    "prevbg" => Some(style.prev_bg(col_fg)),
                     // When the string is supposed to be a color:
                     // Decide if we yield none, reset background or set color.
                     color_string => {
