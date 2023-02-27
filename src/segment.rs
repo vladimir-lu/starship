@@ -20,11 +20,7 @@ impl TextSegment {
     // Returns the AnsiString of the segment value
     fn ansi_string(&self, prev: Option<&AnsiString>) -> AnsiString {
         match self.style {
-            Some(style) =>
-            // TODO: insert new logic here
-            {
-                style.style().paint(&self.value)
-            }
+            Some(style) => style.custom(prev).paint(&self.value),
             None => AnsiString::from(&self.value),
         }
     }

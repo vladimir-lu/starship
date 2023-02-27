@@ -291,6 +291,25 @@ impl CustomStyle {
         }
     }
 
+    pub fn custom(&self, prev: Option<&nu_ansi_term::AnsiString>) -> nu_ansi_term::Style {
+        let mut current = self.style;
+        match prev {
+            None => current,
+            Some(prev_string) => {
+                if self.prev_bg {
+                    log::warn!("prev_bg, text: {:?}", prev_string);
+                    current.background = prev_string.style_ref().background.to_owned();
+                }
+                if self.prev_fg {
+                    log::warn!("prev_fg, text: {:?}", prev_string);
+                    current.foreground = prev_string.style_ref().foreground.to_owned();
+                }
+
+                current
+            }
+        }
+    }
+
     pub fn style(&self) -> &nu_ansi_term::Style {
         &self.style
     }
